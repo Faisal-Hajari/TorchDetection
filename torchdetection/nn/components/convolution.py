@@ -65,17 +65,19 @@ class Conv2d(BaseConv):
         padding (int, optional): Padding. If None, padding is calculated to maintain output shape.
         groups (int): Groups.
         dilation (int): Dilation.
+        bias (bool): Whether to use bias.
     """
 
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int]],
+        kernel_size: Union[int, Tuple[int, int]],
         stride: int = 1,
-        padding: Optional[int] = None,
+        padding: Optional[Union[int, Tuple[int, int]]] = None,
         groups: int = 1,
         dilation: int = 1,
+        bias: bool = True,
     ):
         super().__init__()
         self.conv = nn.Conv2d(
@@ -88,6 +90,7 @@ class Conv2d(BaseConv):
             ),
             groups=groups,
             dilation=dilation,
+            bias=bias,
         )
         self.kernel_size = (
             kernel_size
