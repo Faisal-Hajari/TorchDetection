@@ -1,0 +1,20 @@
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+**/__pycache__/
+**/__pycache__/**
+
+# Test and coverage outputs
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Compiled files in your package
+torchdetection/nn/__pycache__/
+torchdetection/nn/components/__pycache__/
+torchdetection/nn/necks/__pycache__/
+
+# OS-specific
+.DS_Store
+Thumbs.db
