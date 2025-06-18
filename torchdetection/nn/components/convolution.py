@@ -133,7 +133,7 @@ class RepConv(BaseConv):
 
     def __init__(
         self,
-        branches: List[Union[Conv2d]],
+        branches: List[Conv2d],
         atol: float = 1e-6,
     ) -> None:
         """Initialize the RepConv layer.
@@ -146,7 +146,7 @@ class RepConv(BaseConv):
         super().__init__()
         self.branches = nn.ModuleList(branches)
         self.reparametrized = False
-        self.merged_conv: Optional[Union[Conv2d]] = None
+        self.merged_conv: Union[Conv2d, None] = None
         self.atol = atol
         self._validate_branches(self.branches, self.atol)
 
@@ -204,7 +204,7 @@ class RepConv(BaseConv):
             if branch.kernel_size[0] % 2 == 0:
                 raise ValueError("All branches must have odd kernel_size")
 
-        # is this good ? idk man
+        # is this good ? (we are hard evaluating if the settings are correct)
         merged_conv = self._create_merged_conv(self.branches)
         max_k = max(conv.kernel_size[0] for conv in branches)
         input = torch.randn(1, merged_conv.in_channels, max_k * 2, max_k * 2)
