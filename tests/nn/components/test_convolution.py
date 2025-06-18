@@ -3,6 +3,16 @@ from torchdetection.nn.components.convolution import *
 import torch
 from torch import nn
 
+class TestBaseClasses: 
+    def test_base_conv(self):
+        conv = BaseConv()
+        with pytest.raises(NotImplementedError):
+            conv(torch.randn(1, 3, 32, 32))
+    
+    def test_base_conv_block(self):
+        block = BaseConvBlock()
+        with pytest.raises(NotImplementedError):
+            block(torch.randn(1, 3, 32, 32))
 
 class TestConv2d:
     def test_forward(self):
@@ -61,6 +71,11 @@ class TestRepConv:
         branches = [Conv2d(3, 16, (3, 5)), Conv2d(3, 16, 1)]
         with pytest.raises(ValueError):
             RepConv(branches)
+        
+        #empty branches
+        branches = []
+        with pytest.raises(ValueError):
+            RepConv(branches)
 
     def _evalute_reparametrize(self, branches: List[Conv2d], in_channels: int):
         repconv = RepConv(branches, atol=1e-5)
@@ -109,3 +124,243 @@ class TestRepConv:
         assert torch.allclose(train_output, inference_output, atol=1e-6)
         assert repconv.reparametrized is True
         assert repconv.merged_conv is not None
+
+    def test_reparametrize_failure(self):
+        branches = [Conv2d(3, 16, 3), Conv2d(3, 16, 1)]
+        repconv = RepConv(branches, atol=1e-5)
+        repconv.reparametrize()
+        with pytest.raises(RuntimeError):
+            repconv.reparametrize()
+    
+
+class TestPostActivationConvBlock:
+
+    def test_forward(self):
+        conv = Conv2d(3, 3, 7)
+        norm = nn.BatchNorm2d(3)
+        activation = nn.ReLU()
+        block = PostActivationConvBlock(conv, norm, activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = activation(norm(conv(input)))
+        assert output.shape == (1, 3, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+    def _test_excpected_output(self,  conv:Conv2d, norm:nn.Module, activation:nn.Module):
+        block = PostActivationConvBlock(conv, norm, activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = activation(norm(conv(input)))
+        assert output.shape == (1, 3, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+    def test_with_different_norms(self):
+        #batch norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.BatchNorm2d(3), nn.ReLU())
+
+        #group norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.GroupNorm(3, 3), nn.ReLU())
+
+        #instance norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.InstanceNorm2d(3), nn.ReLU())
+
+        #layer norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.LayerNorm([3, 32, 32]), nn.ReLU())
+
+        #rms norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.RMSNorm([3, 32, 32]), nn.ReLU())
+
+        #sync batch norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.SyncBatchNorm(3), nn.ReLU())
+
+        #local response norm 
+        self._test_excpected_output(Conv2d(3, 3, 7), nn.LocalResponseNorm(3), nn.ReLU())
+
+    def test_edge_cases(self):
+        """Test important edge cases for PostActivation"""
+        
+        # No normalization (norm=None)
+        conv = Conv2d(3, 16, 7)
+        activation = nn.ReLU()
+        block = PostActivationConvBlock(conv, norm=None, activation=activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = activation(conv(input))  # Just conv → activation
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+        # No activation (activation=None)
+        conv = Conv2d(3, 16, 7)
+        norm = nn.BatchNorm2d(16)  # NOTE: norm on OUTPUT channels for PostActivation
+        block = PostActivationConvBlock(conv, norm=norm, activation=None)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = norm(conv(input))  # Just conv → norm
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+        # Neither norm nor activation (just conv)
+        conv = Conv2d(3, 16, 7)
+        block = PostActivationConvBlock(conv, norm=None, activation=None)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = conv(input)  # Just conv
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+    def test_with_different_activations(self):
+        """Test various activation functions"""
+        conv = Conv2d(3, 16, 7)
+        norm = nn.BatchNorm2d(16)  # On output channels for PostActivation
+        
+        activations = [
+            nn.ReLU(),
+            nn.LeakyReLU(),
+            nn.ELU(),
+            nn.SiLU(),      # Swish - important for YOLOv11!
+            nn.GELU(),
+            nn.Mish(),
+            nn.Hardswish(),
+            nn.ReLU6(),
+            nn.Tanh(),
+            nn.Sigmoid(),
+        ]
+        
+        input = torch.randn(1, 3, 32, 32)
+        
+        for activation in activations:
+            block = PostActivationConvBlock(conv, norm, activation)
+            output = block(input)
+            expected_output = activation(norm(conv(input)))  # conv → norm → activation
+            assert output.shape == (1, 16, 32, 32)
+            assert torch.allclose(output, expected_output)
+
+    def test_silu_activation_for_yolo(self):
+        """SiLU/Swish activation - CRITICAL for YOLOv11 implementation!"""
+        conv = Conv2d(3, 16, 7)
+        norm = nn.BatchNorm2d(16)  # On output channels
+        activation = nn.SiLU()  # This will be used in YOLOv11 CBS blocks
+        block = PostActivationConvBlock(conv, norm, activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = activation(norm(conv(input)))  # conv → norm → activation
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+class TestPreActivationConvBlock:
+
+    def test_forward(self):
+        conv = Conv2d(3, 16, 7)  # 3 input channels, 16 output channels
+        norm = nn.BatchNorm2d(3)  # NOTE: norm on INPUT channels (3), not output (16)
+        activation = nn.ReLU()
+        block = PreActivationConvBlock(conv, norm, activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        # PreActivation order: norm → activation → conv
+        expected_output = conv(activation(norm(input)))
+        assert output.shape == (1, 16, 32, 32)  # Output has 16 channels
+        assert torch.allclose(output, expected_output)
+
+    def _test_expected_output(self, conv: Conv2d, norm: nn.Module, activation: nn.Module):
+        block = PreActivationConvBlock(conv, norm, activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        # PreActivation order: norm → activation → conv
+        expected_output = conv(activation(norm(input)))
+        assert output.shape == (1, conv.out_channels, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+    def test_with_different_norms(self):
+        # NOTE: All norms are on INPUT channels (3), not output channels!
+        
+        # batch norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.BatchNorm2d(3), nn.ReLU())
+
+        # group norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.GroupNorm(3, 3), nn.ReLU())
+
+        # instance norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.InstanceNorm2d(3), nn.ReLU())
+
+        # layer norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.LayerNorm([3, 32, 32]), nn.ReLU())
+
+        # rms norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.RMSNorm([3, 32, 32]), nn.ReLU())
+
+        # sync batch norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.SyncBatchNorm(3), nn.ReLU())
+
+        # local response norm 
+        self._test_expected_output(Conv2d(3, 16, 7), nn.LocalResponseNorm(3), nn.ReLU())
+
+    def test_edge_cases(self):
+        """Test important edge cases for PreActivation"""
+        
+        # No normalization (norm=None)
+        conv = Conv2d(3, 16, 7)
+        activation = nn.ReLU()
+        block = PreActivationConvBlock(conv, norm=None, activation=activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = conv(activation(input))  # Just activation → conv
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+        # No activation (activation=None)
+        conv = Conv2d(3, 16, 7)
+        norm = nn.BatchNorm2d(3)
+        block = PreActivationConvBlock(conv, norm=norm, activation=None)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = conv(norm(input))  # Just norm → conv
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+        # Neither norm nor activation (just conv)
+        conv = Conv2d(3, 16, 7)
+        block = PreActivationConvBlock(conv, norm=None, activation=None)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = conv(input)  # Just conv
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
+
+    def test_with_different_activations(self):
+        """Test various activation functions"""
+        conv = Conv2d(3, 16, 7)
+        norm = nn.BatchNorm2d(3)  # On input channels
+        
+        activations = [
+            nn.ReLU(),
+            nn.LeakyReLU(),
+            nn.ELU(),
+            nn.SiLU(),      # Swish - important for YOLOv11!
+            nn.GELU(),
+            nn.Mish(),
+            nn.Hardswish(),
+            nn.ReLU6(),
+            nn.Tanh(),
+            nn.Sigmoid(),
+        ]
+        
+        input = torch.randn(1, 3, 32, 32)
+        
+        for activation in activations:
+            block = PreActivationConvBlock(conv, norm, activation)
+            output = block(input)
+            expected_output = conv(activation(norm(input)))
+            assert output.shape == (1, 16, 32, 32)
+            assert torch.allclose(output, expected_output)
+
+    def test_silu_activation_for_yolo(self):
+        """SiLU/Swish activation - CRITICAL for YOLOv11 implementation!"""
+        conv = Conv2d(3, 16, 7)
+        norm = nn.BatchNorm2d(3)
+        activation = nn.SiLU()  # This will be used in YOLOv11
+        block = PreActivationConvBlock(conv, norm, activation)
+        input = torch.randn(1, 3, 32, 32)
+        output = block(input)
+        expected_output = conv(activation(norm(input)))
+        assert output.shape == (1, 16, 32, 32)
+        assert torch.allclose(output, expected_output)
