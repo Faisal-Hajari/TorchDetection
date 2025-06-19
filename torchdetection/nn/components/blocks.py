@@ -5,7 +5,6 @@ architectures.
 """
 
 import math
-from typing import Optional, Union, Tuple
 
 import torch
 from torch import nn
@@ -25,9 +24,9 @@ class CBS(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int, int]] = 1,
+        kernel_size: int | tuple[int, int] = 1,
         stride: int = 1,
-        padding: Optional[Union[int, Tuple[int, int]]] = None,
+        padding: int | tuple[int, int] | None = None,
         groups: int = 1,
         dilation: int = 1,
     ):
@@ -54,19 +53,21 @@ class CBS(nn.Module):
         super().__init__()
 
         conv = Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            groups,
-            dilation,
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            dilation=dilation,
             bias=False,
         )
         norm = nn.BatchNorm2d(out_channels)
         activation = nn.SiLU()
 
-        self.block = PostActivationConvBlock(conv, norm, activation)
+        self.block = PostActivationConvBlock(
+            conv=conv, norm=norm, activation=activation
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through CBS block."""
@@ -82,7 +83,7 @@ class DepthwiseConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int, int]] = 1,
+        kernel_size: int | tuple[int, int] = 1,
         stride: int = 1,
         dilation: int = 1,
     ):
@@ -103,13 +104,13 @@ class DepthwiseConv(nn.Module):
         """
         super().__init__()
         self.block = CBS(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            None,
-            math.gcd(in_channels, out_channels),
-            dilation,
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=None,
+            groups=math.gcd(in_channels, out_channels),
+            dilation=dilation,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -143,7 +144,7 @@ class Bottleneck(BaseBottleneck):
         out_channels: int,
         shortcut: bool = True,
         groups: int = 1,
-        kernel_sizes: Tuple[int, int] = (3, 3),
+        kernel_sizes: tuple[int | tuple[int, int], int | tuple[int, int]] = (3, 3),
         expansion: float = 0.5,
     ):
         """
@@ -173,9 +174,18 @@ class Bottleneck(BaseBottleneck):
             )
 
         hidden_channels = int(out_channels * expansion)
-        self.conv1 = CBS(in_channels, hidden_channels, kernel_sizes[0], 1)
+        self.conv1 = CBS(
+            in_channels=in_channels,
+            out_channels=hidden_channels,
+            kernel_size=kernel_sizes[0],
+            stride=1,
+        )
         self.conv2 = CBS(
-            hidden_channels, out_channels, kernel_sizes[1], 1, groups=groups
+            in_channels=hidden_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_sizes[1],
+            stride=1,
+            groups=groups,
         )
         self.add_shortcut = shortcut
 
@@ -223,10 +233,21 @@ class DepthwiseBottleneck(BaseBottleneck):
             )
 
         hidden_channels = int(out_channels * expansion)
-        self.conv1 = CBS(in_channels, hidden_channels, 3, 1)
+        self.conv1 = CBS(
+            in_channels=in_channels,
+            out_channels=hidden_channels,
+            kernel_size=3,
+            stride=1,
+        )
 
         # Use depthwise convolution (groups = in_channels)
-        self.conv2 = CBS(hidden_channels, out_channels, 3, 1, groups=hidden_channels)
+        self.conv2 = CBS(
+            in_channels=hidden_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            stride=1,
+            groups=hidden_channels,
+        )
         self.add_shortcut = shortcut
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
