@@ -183,3 +183,54 @@ class Bottleneck(BaseBottleneck):
         """Forward pass with optional shortcut connection."""
         out = self.conv2(self.conv1(x))
         return x + out if self.add_shortcut else out
+
+
+class DepthwiseBottleneck(BaseBottleneck):
+    """
+    Depthwise separable bottleneck for efficiency.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        shortcut: bool = True,
+        expansion: float = 0.5,
+    ):
+        """
+        Initialize DepthwiseBottleneck block.
+
+        Args:
+            in_channels: Input channels
+            out_channels: Output channels
+            shortcut: Add shortcut connection
+            expansion: Expansion factor for the number of channels
+
+        Example:
+            >>> # Standard depthwise bottleneck
+            >>> bottleneck = DepthwiseBottleneck(64, 64, shortcut=True)
+            >>> x = torch.randn(1, 64, 224, 224)
+            >>> out = bottleneck(x)  # Shape: [1, 64, 224, 224]
+            >>> # Different dimensions - must explicitly disable shortcut
+            >>> bottleneck = DepthwiseBottleneck(64, 128, shortcut=False)
+        """
+        super().__init__()
+
+        if shortcut and in_channels != out_channels:
+            raise ValueError(
+                f"Shortcut requires in_channels == out_channels. "
+                f"Got {in_channels} != {out_channels}. Set shortcut=False."
+            )
+
+        hidden_channels = int(out_channels * expansion)
+        self.conv1 = CBS(in_channels, hidden_channels, 3, 1)
+
+        # Use depthwise convolution (groups = in_channels)
+        self.conv2 = CBS(hidden_channels, out_channels, 3, 1, groups=hidden_channels)
+        self.add_shortcut = shortcut
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.conv2(self.conv1(x))
+        return x + out if self.add_shortcut else out
+
+
