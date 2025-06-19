@@ -1,8 +1,7 @@
 """Convolutional components for building detection models.
 
 This module provides reusable convolutional building blocks that can be composed
-to create more complex architectures. Each component follows PyTorch conventions
-and maintains explicit dependencies.
+to create more complex architectures.
 """
 
 import torch

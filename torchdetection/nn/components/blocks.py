@@ -1,3 +1,9 @@
+"""Blocks for building detection models.
+
+This module provides reusable blocks that can be composed to create more complex
+architectures.
+"""
+
 import math
 from typing import Optional, Union, Tuple
 
@@ -40,10 +46,8 @@ class CBS(nn.Module):
         Example:
             >>> # Standard CBS block
             >>> cbs = CBS(3, 16, 3)
-            >>>
             >>> # Depthwise CBS block
             >>> dw_cbs = CBS(16, 16, 3, groups=16)
-            >>>
             >>> # Stride 2 for downsampling
             >>> down_cbs = CBS(16, 32, 3, stride=2)
         """
